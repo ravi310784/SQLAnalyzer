@@ -1,0 +1,338 @@
+﻿@page "/QueryAnalyzer"
+@inject IConfiguration _conf
+@using BlazorBootstrap;
+@using Microsoft.Data.SqlClient
+@using System.Data
+@rendermode InteractiveServer
+
+<PageTitle>SQLQuery</PageTitle>
+<h3>SQLQuery</h3>
+
+<div class="divParent">
+    <p class="group">
+        <div class="divControl">
+            <select class="drp" @onchange="SelectEnv">
+                Please select Env
+                <option>Please select Env</option>
+                <option>QA</option>
+                <option>Prod</option>
+            </select>
+        </div>
+        <div class="drp divControl">
+            <select class="drp" @onchange="SelectDev">
+                Please select Databases
+                <option>Please select DB</option>
+                <option>Cloud</option>
+                <option>legacy</option>
+            </select>
+        </div>
+        <div class="divControl">
+            <input class="form-control" type="text" maxlength="6" @bind-value="@PNR" />
+        </div>
+        <div class="drp divControl">
+            <select class="drp" @onchange="SelectLogType">
+                Please select Log Type
+                <option>All</option>
+                <option>Info</option>
+                <option>Warning</option>
+                <option>Exception</option>
+            </select>
+        </div>
+        <div class="divControl">
+
+            <select class="drp" @onchange="SelectCon">
+                Condition:
+                <option>Please select Condition</option>
+                <option>Greater</option>
+                <option>Less</option>
+                <option>Greater and Equal</option>
+                <option>Less and Equal</option>
+                <option>Equal</option>
+                <option>Not Equal</option>
+            </select>
+        </div>
+        <div class="divControl">
+            <input class="form-control" title="Select Source" id="txtSource" type="text" required @bind-value="source" />
+        </div>
+        <div class="divControl">
+            <input class="form-control" id="txtDate" type="datetime" required @bind-value="dt" />
+        </div>
+        <div class="divControl">
+            <button class="btn btn-info" @onclick="(async () => { await Search();  })">Search</button>
+        </div>
+        <div class="divControl">
+            <span class="validation">@IsValid</span>
+        </div>
+    </p>
+    <p>
+        <span>@loadingmsg</span>
+        @* @if (showload)
+        {
+            <Progress Class="@classapply">
+                <ProgressBar Width="10" @ref="progressBar" Type="ProgressType.StripedAndAnimated" Color="ProgressColor.Success" />
+            </Progress>
+        } *@
+    </p>
+</div>
+<div>
+    
+        <Grid @ref="gridSearch" TItem="SearchResult"
+              Class="gridcls table table-hover table-bordered table-striped"
+              Data=re          
+              AllowPaging="true"
+              PageSize="5"
+              Responsive="true">
+
+            <GridColumn TItem="SearchResult" HeaderText="Id">
+                @context.id
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="PNR">
+                @context.pnr
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Time">
+                @context.Timestamp
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Channel">
+                @context.channel
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Source">
+                @context.source
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Level">
+                @context.level
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Message">
+                @context.message
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Details">
+                @context.details
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Queue Location">
+                @context.queue_location
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Exception">
+                @context.exception
+            </GridColumn>
+            <GridColumn TItem="SearchResult" HeaderText="Machine Name">
+                @context.machinename
+            </GridColumn>
+
+        </Grid>
+</div>
+@code {
+    string loadingmsg = string.Empty;
+    string classapply = "hide";
+    bool showload = false;
+    bool loadcomplete = false;
+    Grid<SearchResult> gridSearch;
+    ProgressBar progressBar;
+    List<SearchResult> re = new List<SearchResult>();
+    string source = string.Empty;
+    public string selEnv = "";
+    public string selDB = "";
+    public string selCon = "";
+    string logType = string.Empty;
+    public string PNR = "Please input PNR";
+    string connectionString = string.Empty;
+    DateTime dt = DateTime.Now;
+    DateTime time = DateTime.Now;
+    string IsValid = "";
+    private async Task CompleteLoad()
+    {
+        loadingmsg = "";
+    }
+    private bool Validation()
+    {
+        IsValid = "";
+        if (string.IsNullOrEmpty(selEnv) || selEnv.Equals("Please select Env")
+        || string.IsNullOrEmpty(selDB) || selDB.Equals("Please select DB") ||
+        string.IsNullOrEmpty(selCon) || selCon.Equals("Please select Condition") ||
+        ((string.IsNullOrEmpty(PNR) || PNR.Equals("Please input PNR")) && (string.IsNullOrEmpty(source) || source.Equals("Please input PNR"))))
+        {
+            IsValid = "Please correct your inputs!!";
+            return false;
+        }
+        return true;
+    }
+    private void IncreaseProgressBar()
+    {
+        progressBar.IncreaseWidth(10);
+        progressBar.SetLabel($"{progressBar.GetWidth()}%");
+        progressBar.Color = ProgressColor.Success;
+        //await Search();
+    }
+    private void ResetProgressBar()
+    {
+        progressBar.SetWidth(100);
+        progressBar.Color = ProgressColor.Info;
+        progressBar.SetLabel($"{progressBar.GetWidth()}%");
+    }
+    private async Task Search()
+    {
+        if (Validation())
+        {
+            loadingmsg = "Loading...";
+            re = new List<SearchResult>();
+            SelectConnection();
+            new Task(async () =>
+            {
+            await Task.Delay(5000);
+            await SearchDB();
+            await gridSearch.RefreshDataAsync();           
+            await CompleteLoad();
+
+            }).Start();
+        }
+    }
+    private void SelectConnection()
+    {
+        switch (selDB)
+        {
+            case "Cloud":
+                if (selEnv.Equals("QA"))
+                {
+                    connectionString = _conf.GetSection("ConnectionStrings").GetSection("DatabaseConnectionQA").Value;
+                }
+                else if (selEnv.Equals("Prod"))
+                {
+                    connectionString = _conf.GetSection("ConnectionStrings").GetSection("DatabaseConnectionPrd").Value;
+                }
+                break;
+            case "legacy":
+                if (selEnv.Equals("QA"))
+                {
+                    connectionString = _conf.GetSection("ConnectionStrings").GetSection("DatabaseConnectionQA").Value;
+                }
+                else if (selEnv.Equals("Prod"))
+                {
+                    connectionString = _conf.GetSection("ConnectionStrings").GetSection("DatabaseConnectionPrd").Value;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    private void SelectEnv(ChangeEventArgs e)
+    {
+        selEnv = (string)e.Value;
+    }
+    private void SelectDev(ChangeEventArgs e)
+    {
+        selDB = (string)e.Value;
+
+
+    }
+    private void SelectCon(ChangeEventArgs e)
+    {
+        selCon = (string)e.Value;
+
+    }
+
+    private async Task<IEnumerable<SearchResult>> SearchDB()
+    {
+        DataTable table = new DataTable();
+        string tableName = GetTable(selDB);
+        string condi = GetCondition(selCon);
+        SqlConnection connection = new SqlConnection(connectionString);
+        if (connection.State != ConnectionState.Open)
+        {
+            connection.Open();
+        }
+        string query = string.Empty;
+        query = $"select * from {tableName} where timestamp {condi}'{dt}'";
+        if (!string.IsNullOrEmpty(PNR))
+        {
+            query += $" and pnr='{PNR}'";
+        }
+        if (!string.IsNullOrEmpty(source))
+        {
+            query += $" and source like '%{source}%'";
+        }
+        if (!string.IsNullOrEmpty(logType) && logType != "All")
+        {
+            query += $" and type like '%{logType}%'";
+        }
+        query += " order by timestamp desc, id desc";
+
+
+        SqlCommand cmd = new SqlCommand(query);
+        cmd.Connection = connection;
+        cmd.CommandTimeout = 10000000;
+        var dr = cmd.ExecuteReader();
+        table.Load(dr);
+
+        foreach (DataRow row in table.Rows)
+        {
+            SearchResult sr = new SearchResult();
+            sr.id = Convert.ToInt32(row["id"]);
+            sr.pnr = (string)row["pnr"];
+            sr.exception = (string)row["exception"];
+            sr.queue_location = (string)row["queue_location"];
+            sr.source = (string)row["source"];
+            sr.message = (string)row["message"];
+            sr.details = (string)row["details"];
+            sr.channel = (string)row["channel"];
+            sr.level = (string)row["level"];
+            sr.machinename = (string)row["machinename"];
+            sr.flight_date = Convert.ToDateTime(row["flight_date"]);
+            sr.Timestamp = Convert.ToDateTime(row["Timestamp"]);
+            sr.type = (string)row["type"];
+            re.Add(sr);
+        }
+        return re;
+    }
+    public static string GetTable(string connName)
+    {
+        switch (connName)
+        {
+            case "Cloud":
+                return "[CloudDB]";
+            case "legacy":
+                return "[legacy]";
+            default:
+                return "";
+                break;
+        }
+    }
+    public static string GetCondition(string cond)
+    {
+        switch (cond)
+        {
+            case "Greater":
+                return ">";
+            case "Less":
+                return "<";
+            case "Greater and Equal":
+                return ">=";
+            case "Less and Equal":
+                return "<=";
+            case "Equal":
+                return "=";
+            case "Not Equal":
+                return "<>";
+            default:
+                return "";
+                break;
+        }
+    }
+    private class SearchResult
+    {
+        public int id { get; set; }
+        public string channel { get; set; }
+        public string pnr { get; set; }
+        public DateTime? flight_date { get; set; }
+        public string queue_location { get; set; }
+        public string message { get; set; }
+        public string details { get; set; }
+        public string level { get; set; }
+        public string type { get; set; }
+        public string machinename { get; set; }
+        public string exception { get; set; }
+        public string source { get; set; }
+        public DateTime? Timestamp { get; set; }
+    }
+    private void SelectLogType(ChangeEventArgs e)
+    {
+        logType = (string)e.Value;
+    }
+}
